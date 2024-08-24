@@ -1,5 +1,4 @@
-import numpy as np
-from rknn.api import RKNN
+from rknn.api import RKNN //Requires rknn-toolkit2 python api whl. Ubuntu x86 ONLY!
 
 if __name__ == '__main__':
 
