@@ -1,2 +1,29 @@
 # rknn-object-detection
 python scripts for rknn object detection for Orange pi 5
+
+# How to make a model
+### Setup yolov5 toolkit
+Python3.12 required
+1. Clone the [yolov5 github repo](https://github.com/ultralytics/yolov5)
+2. Setup a venv to use with the toolkit
+3. Install all the requirements `pip install -r requirements.txt`
+4. Verify that it works (or just wait until you obtain the dataset to train)
+### Obtain dataset
+You can manually make a dataset, or use roboflow. Make sure the image dimensions match how you are going to train it
+1. Get the correct dataset format downloaded and in the same folder as the yolov5 toolkit
+2. Find the `.yaml` file for that dataset. You might want to rename it.
+3. In that yaml file, update the paths for the `train` and `valid` folders so that they are correct
+### Train 
+1. Run the following command (make sure you are using your inputs. For testing, do a 3 epoch training first) `python train.py --img 640 --epochs 30 --data data.yaml --weights yolov5.pt`
+2. If you are on a silicon mac using m1 or m2 (m3 not supported yet), add `--device mps`. If you are on a cuda device (Nvidia GPU) add `--device cuda`. If you encounter issues, remove the flag to train on cpu
+3. Once the training is finished, verify that you have a `runs/train/exp/weights/best.pt` file. Note that the `exp` folder may become `exp2` or `exp3` if you ran multiple trainings. The highest number is the latest training
+4. You can upload the model to roboflow using `upload.py`. Make sure to change the version and expNum variables. After uploading, use the visualize tool on roboflow to test your model
+### Convert to ONNX
+1. Once training is finished, run `python export.py --weights /runs/train/exp/weights/best.pt --include onnx`
+2. Find the output onnx file in the same directory was your `best.pt` file
+### Converting to RKNN
+1. Setup a linux x86 device with python3.10. Install the RKNN toolkit python package from [here](https://github.com/airockchip/rknn-toolkit2/tree/master/rknn-toolkit2/packages)
+2. Upload your `best.onnx` file to that device
+3. Run `convert.py` to get the output `model.rknn` file
+### Run on rockpi
+This is a mystery. Yet to be resolved
