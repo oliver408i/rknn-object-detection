@@ -1,4 +1,4 @@
-from rknn.api import RKNN //Requires rknn-toolkit2 python api whl. Ubuntu x86 ONLY!
+from rknn.api import RKNN #Requires rknn-toolkit2 python api whl. Ubuntu x86 ONLY!
 
 if __name__ == '__main__':
 
@@ -10,9 +10,8 @@ if __name__ == '__main__':
     rknn.config(mean_values=[128, 128, 128], std_values=[128, 128, 128], target_platform='rk3588')
     print('done')
 
-    # Load model (from https://www.tensorflow.org/lite/guide/hosted_models?hl=zh-cn)
     print('--> Loading model')
-    ret = rknn.load_tflite(model='model.tflite')
+    ret = rknn.load_onnx(model='best.onnx')
     if ret != 0:
         print('Load model failed!')
         exit(ret)
