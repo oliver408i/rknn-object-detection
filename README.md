@@ -14,8 +14,9 @@ You can manually make a dataset, or use roboflow. Make sure the image dimensions
 2. Find the `.yaml` file for that dataset. You might want to rename it.
 3. In that yaml file, update the paths for the `train` and `valid` folders so that they are correct
 ### Train 
+You don't need a x86 linux machine for this setup. Use the most powerful machine you have for this. Recommended to use a good GPU such as the RTX seris or Apple M1,M2. Note that for CUDA, make sure you have the correct torch version install (you might need to manually update your CUDA version and/or reinstall pytorch with the current CUDA version support enabled).
 1. Run the following command (make sure you are using your inputs. For testing, do a 3 epoch training first) `python train.py --img 640 --epochs 30 --data data.yaml --weights yolov5.pt`
-2. If you are on a silicon mac using m1 or m2 (m3 not supported yet), add `--device mps`. If you are on a cuda device (Nvidia GPU) add `--device cuda`. If you encounter issues, remove the flag to train on cpu
+2. If you are on a silicon mac using m1 or m2 (m3 not supported yet), add `--device mps`. If you are on a cuda device (Nvidia GPU) add `--device 0`. If you encounter issues, remove the flag to train on cpu
 3. Once the training is finished, verify that you have a `runs/train/exp/weights/best.pt` file. Note that the `exp` folder may become `exp2` or `exp3` if you ran multiple trainings. The highest number is the latest training
 4. You can upload the model to roboflow using `upload.py`. Make sure to change the version and expNum variables. After uploading, use the visualize tool on roboflow to test your model
 ### Convert to ONNX
@@ -26,4 +27,7 @@ You can manually make a dataset, or use roboflow. Make sure the image dimensions
 2. Upload your `best.onnx` file to that device
 3. Run `convert.py` to get the output `model.rknn` file
 ### Run on rockpi
-This is a mystery. Yet to be resolved
+1. Upload `pp.py` and `npuPipeline.py` as well as `model.rknn` to the orange pi.
+2. You can use `npuPipeline.py`, which will get all detections of every `.jpeg` image in the `images` folder. You can change this in the code. You can also change the output to go wherever you need it to go
+
+Camera streaming is still WIP and to be tested in Tuesday
