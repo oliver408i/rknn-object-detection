@@ -26,7 +26,7 @@ You don't need a x86 linux machine for this setup. Use the most powerful machine
 1. Setup a linux x86 device with python3.10. Install the RKNN toolkit python package from [here](https://github.com/airockchip/rknn-toolkit2/tree/master/rknn-toolkit2/packages)
 2. Upload your `best.onnx` file to that device
 3. Run `convert.py` to get the output `model.rknn` file
-### Run on rockpi
+### Run on Orange Pi
 1. Upload `pp.py` and `npuPipeline.py` as well as `model.rknn` to the orange pi.
 2. You can use `npuPipeline.py`, which will get all detections of every `.jpeg` image in the `images` folder. You can change this in the code. You can also change the output to go wherever you need it to go
 
