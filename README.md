@@ -1,5 +1,5 @@
 # rknn-object-detection
-python scripts for rknn object detection for Orange pi 5
+python scripts for rknn object detection for Orange pi 5. Based on yolov5 object detection. Runs on all 3 NPU cores
 
 # How to make a model
 ### Setup yolov5 toolkit
@@ -29,5 +29,11 @@ You don't need a x86 linux machine for this setup. Use the most powerful machine
 ### Run on Orange Pi
 1. Upload `pp.py` and `npuPipeline.py` as well as `model.rknn` to the orange pi.
 2. You can use `npuPipeline.py`, which will get all detections of every `.jpeg` image in the `images` folder. You can change this in the code. You can also change the output to go wherever you need it to go
-
 Camera streaming is still WIP and to be tested in Tuesday
+### Private usecase
+- `webServerTesting.py` opens a Bottle webserver on 8080 that serves the latest detection result directly from the npu pipeline. Only the latest result is served and the oldest results are deleted to avoid a memory leak in the pipeline.
+- The web server is meant for other devices to easily access detection results
+- It is current just a POC and closes itself after all images are processed, but once camera streaming is implemented, it will facilitate a (hopefully) reliable and simple way to send results elsewhere
+## Notes on the code
+The only code here that is completely new is the `pp.py` and two pipeline programs. All the converting code is based off existing RKNN api examples and resources. The `upload.py` is just a short script to upload the finished model and I don't consider it a full program.  
+The whole RKNN toolkit is not well documented (and also not well written) which made this whole thing a complete mess to make. It did work out in the end, which is why this is here now, but it took quite a lot of work.
