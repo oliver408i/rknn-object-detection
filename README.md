@@ -30,6 +30,8 @@ You don't need a x86 linux machine for this setup. Use the most powerful machine
 1. Upload `pp.py` and `npuPipeline.py` as well as `model.rknn` to the orange pi.
 2. You can use `npuPipeline.py`, which will get all detections of every `.jpeg` image in the `images` folder. You can change this in the code. You can also change the output to go wherever you need it to go
 Camera streaming is still WIP and to be tested in Tuesday
+### Running yolov8
+Yolov8 detection models are only supported on the multi model NPU pipeline. To use that, do `python npuPipelineWebMultiModel.py --model model.rknn --type yolov8`. Type can be yolov5 or yolov8. Make sure to copy `ppv5.py` and `ppv8.py` to use this pipeline. You don't need to copy `pp.py` as that is the legacy post processor functions for the old `npuPipeline.py`. Yolov8 models should be converted to RKNN in the same way. No support for Yolov8 segmentation models yet as I try to figure out how the output is formatted (it is quite complex).
 ### Private usecase
 - `webServerTesting.py` opens a Bottle webserver on 8080 that serves the latest detection result directly from the npu pipeline. Only the latest result is served and the oldest results are deleted to avoid a memory leak in the pipeline.
 - The web server is meant for other devices to easily access detection results
