@@ -35,3 +35,8 @@ This project now supports yolov8 detection models. Simply convert them using the
 ## Notes on the code
 The only code here that is completely new is the `pp.py` and two pipeline programs. All the converting code is based off existing RKNN api examples and resources. The `upload.py` is just a short script to upload the finished model and I don't consider it a full program.  
 The whole RKNN toolkit is not well documented (and also not well written) which made this whole thing a complete mess to make. It did work out in the end, which is why this is here now, but it took quite a lot of work.
+
+## Code Structure
+Final camera stream system. Each box is a process. WIP explanation
+![NPU pipeline(1)](https://github.com/user-attachments/assets/da31de91-0ed7-4f7e-b67f-7f0b79e849fb)
+
