@@ -26,16 +26,12 @@ You don't need a x86 linux machine for this setup. Use the most powerful machine
 1. Setup a linux x86 device with python3.10. Install the RKNN toolkit python package from [here](https://github.com/airockchip/rknn-toolkit2/tree/master/rknn-toolkit2/packages)
 2. Upload your `best.onnx` file to that device
 3. Run `convert.py` to get the output `model.rknn` file
-### Run on Orange Pi
-1. Upload `pp.py` and `npuPipeline.py` as well as `model.rknn` to the orange pi.
-2. You can use `npuPipeline.py`, which will get all detections of every `.jpeg` image in the `images` folder. You can change this in the code. You can also change the output to go wherever you need it to go
-Camera streaming is still WIP and to be tested in Tuesday
-### Running yolov8
-Yolov8 detection models are only supported on the multi model NPU pipeline. To use that, do `python npuPipelineWebMultiModel.py --model model.rknn --type yolov8`. Type can be yolov5 or yolov8. Make sure to copy `ppv5.py` and `ppv8.py` to use this pipeline. You don't need to copy `pp.py` as that is the legacy post processor functions for the old `npuPipeline.py`. Yolov8 models should be converted to RKNN in the same way. No support for Yolov8 segmentation models yet as I try to figure out how the output is formatted (it is quite complex). Adjust the output function if you wish to have results printed and/or not use a webserver.
-### Private usecase
-- `webServerTesting.py` opens a Bottle webserver on 8080 that serves the latest detection result directly from the npu pipeline. Only the latest result is served and the oldest results are deleted to avoid a memory leak in the pipeline.
-- The web server is meant for other devices to easily access detection results
-- It is current just a POC and closes itself after all images are processed, but once camera streaming is implemented, it will facilitate a (hopefully) reliable and simple way to send results elsewhere
+### Orange pi
+1. Upload your `model.rknn` file, as well as `npuCameraPipe.py` and `ppcb.py`.
+2. Run with `python3 npuCameraPipe.py --model model.rknn --type yolov5`
+3. ^C to exit
+### Yolov8
+This project now supports yolov8 detection models. Simply convert them using the same steps and upload them. When running, use `--type yolov8` to switch to the yolov8 post processing pipeline. Yolov8 segmentation support is planned for the future (yolov5 segmentation is not considered at this moment).
 ## Notes on the code
 The only code here that is completely new is the `pp.py` and two pipeline programs. All the converting code is based off existing RKNN api examples and resources. The `upload.py` is just a short script to upload the finished model and I don't consider it a full program.  
 The whole RKNN toolkit is not well documented (and also not well written) which made this whole thing a complete mess to make. It did work out in the end, which is why this is here now, but it took quite a lot of work.
