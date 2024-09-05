@@ -1,5 +1,5 @@
 # rknn-object-detection
-python scripts for rknn object detection for Orange pi 5. Based on yolov5 object detection. Runs on all 3 NPU cores
+python scripts for rknn object detection for Orange pi 5. Based on yolov5 object detection. Runs on all 3 NPU cores, averages ~14 FPS, ~300 ms latency streaming camera. ~30 FPS without streaming camera.
 
 # How to make a model
 ### Setup yolov5 toolkit
@@ -27,6 +27,7 @@ You don't need a x86 linux machine for this setup. Use the most powerful machine
 2. Upload your `best.onnx` file to that device
 3. Run `convert.py` to get the output `model.rknn` file
 ### Orange pi
+Written for Orange Pi 5 Pro (RK3588 CPU & NPU). **Must use a powerful heat sink or small fan!**
 1. Upload your `model.rknn` file, as well as `npuCameraPipe.py` and `ppcb.py`.
 2. Run with `python3 npuCameraPipe.py --model model.rknn --type yolov5`
 3. ^C to exit
