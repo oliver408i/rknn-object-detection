@@ -5,6 +5,9 @@ import numpy as np
 import cv2
 import ppcb
 from multiprocessing import Process, Queue, Manager
+from bottle import Bottle, request, run # type: ignore
+from gevent import pywsgi
+from geventwebsocket.handler import WebSocketHandler
 
 parser = argparse.ArgumentParser(description="RKNN Npu Object detection pipeline supporting YOLOv5 and YOLOv8.")
 parser.add_argument('--model', type=str, required=True, help="Path to the RKNN model file (e.g., model.rknn)")
@@ -24,6 +27,26 @@ else:
     raise ValueError("Model type must be either 'yolov5' or 'yolov8'")
 
 sigTerm = False
+
+def webServer(outputs_queue, ldf):
+    logger = setupLogger("webServer")
+
+    app = Bottle()
+
+    @app.route('/ws')
+    def serve_ws():
+        ws = request.environ.get('wsgi.websocket')
+        if not ws:
+            return 'Expected WebSocket request.'
+        while True:
+            if not ldf:
+                continue
+
+            ws.send(ldf)
+            ldf = None
+    
+    server = pywsgi.WSGIServer(('0.0.0.0', 8001), app, handler_class=WebSocketHandler)
+    server.serve_forever()
 
 def signal_handler(sig, frame):
     global sigTerm
@@ -130,7 +153,7 @@ def setupLogger(name):
 
 import time
 
-def displayFrames(output_queue):
+def displayFrames(output_queue, ldf):
     last_displayed_id = -1  # Keep track of the last displayed frame ID
     logger = setupLogger("displayFrames")
     fps = 0
@@ -164,6 +187,12 @@ def displayFrames(output_queue):
                         fps = frame_count / elapsed_time
                         frame_count = 0
                         start_time = end_time
+
+                    ldf = {
+                        "frame_id": i.frame_id,
+                        "timeStamp": i.timeStamp,
+                        "detections": i.detections
+                    }
 
                     # Calculate latency in milliseconds
                     latency_ms = round((time.time() - i.timeStamp) * 1000)
@@ -273,6 +302,7 @@ with Manager() as manager:
     post_processing_queue = Queue()
     outputs_queue = manager.list()
     input_queue = Queue()
+    ldf = manager.dict()
 
     # Register the signal handler for Ctrl+C
     signal.signal(signal.SIGINT, signal_handler)
@@ -295,9 +325,13 @@ with Manager() as manager:
         processes.append(p)
 
     # Start image display
-    w = Process(target=displayFrames, args=(outputs_queue,))
+    w = Process(target=displayFrames, args=(outputs_queue,ldf))
     w.start()
     processes.append(w)
+
+    ws = Process(target=webServer, args=(outputs_queue,ldf))
+    ws.start()
+    processes.append(ws)
 
     
 
