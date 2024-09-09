@@ -1,6 +1,6 @@
 # NPU Camera Streamer
 from rknnlite.api import RKNNLite # type: ignore
-import os, time, logging, sys, signal, re
+import os, time, logging, sys, signal, re, json
 import numpy as np
 import cv2
 import ppcb
@@ -55,6 +55,8 @@ def setupLogger(name):
     logger.addHandler(console_handler)
 
     return logger
+
+
 
 logger = setupLogger("argParser")
 
@@ -150,6 +152,15 @@ else:
 
 sigTerm = False
 
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.float32):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()  # Convert numpy arrays to lists
+        return super(NumpyEncoder, self).default(obj)
+
 def webServer(outputs_queue, ldf):
     logger = setupLogger("webServer")
 
@@ -157,17 +168,21 @@ def webServer(outputs_queue, ldf):
 
     @app.route('/ws')
     def serve_ws():
+        logger.debug("New connection")
         ws = request.environ.get('wsgi.websocket')
+        lastldf = None
         if not ws:
+            logger.warn("Invalid connection: Not ws")
             return 'Expected WebSocket request.'
         while True:
-            if not ldf:
+            if not 'det' in ldf or not ldf['det']:
                 continue
-
-            ws.send(ldf)
-            ldf = None
-    
-    server = pywsgi.WSGIServer(('0.0.0.0', webserver_port), app, handler_class=WebSocketHandler)
+            if lastldf == ldf['det']:
+                continue
+            
+            ws.send(json.dumps(ldf['det'], cls=NumpyEncoder))
+            lastldf = ldf['det']
+    server = pywsgi.WSGIServer(('100.64.0.7', webserver_port), app, handler_class=WebSocketHandler)
     server.serve_forever()
 
 def signal_handler(sig, frame):
@@ -265,11 +280,12 @@ def displayFrames(output_queue, ldf):
                         frame_count = 0
                         start_time = end_time
 
-                    ldf = {
-                        "frame_id": i.frame_id,
-                        "timeStamp": i.timeStamp,
-                        "detections": i.detections
-                    }
+                    if i.detections:
+                        ldf["det"] = {
+                            "frame_id": i.frame_id,
+                            "timeStamp": i.timeStamp,
+                            "detections": i.detections
+                        }
 
                     # Calculate latency in milliseconds
                     latency_ms = round((time.time() - i.timeStamp) * 1000)
@@ -424,7 +440,4 @@ with Manager() as manager:
     for p in processes[npuResolverCount:]:
         p.join()
 
-
-
-    
 
