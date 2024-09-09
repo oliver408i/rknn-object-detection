@@ -1,6 +1,6 @@
 # NPU Camera Streamer
 from rknnlite.api import RKNNLite # type: ignore
-import os, time, logging, argparse, sys, signal
+import os, time, logging, sys, signal, re
 import numpy as np
 import cv2
 import ppcb
@@ -9,15 +9,137 @@ from bottle import Bottle, request, run # type: ignore
 from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
 
-parser = argparse.ArgumentParser(description="RKNN Npu Object detection pipeline supporting YOLOv5 and YOLOv8.")
-parser.add_argument('--model', type=str, required=True, help="Path to the RKNN model file (e.g., model.rknn)")
-parser.add_argument('--type', type=str, choices=['yolov5', 'yolov8'], required=True, help="Model type (yolov5 or yolov8)")
-parser.add_argument('--camera', type=int, default=0, help="Camera index")
+class ColoredFormatter(logging.Formatter):
 
-args = parser.parse_args()
+    grey = "\x1b[38;20m"
+    yellow = "\x1b[93;20m"
+    red = "\x1b[31;20m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+    purple = "\x1b[35;20m"
+    format = "%(asctime)s - %(name)s - "
 
-mfs = args.model
-model_type = args.type
+    FORMATS = {
+        logging.DEBUG: format + purple + "%(levelname)s - %(message)s" + reset,
+        logging.INFO: format + grey + "%(levelname)s - %(message)s" + reset,
+        logging.WARNING: format + yellow + "%(levelname)s - %(message)s" + reset,
+        logging.ERROR: format + red + "%(levelname)s - %(message)s" + reset,
+        logging.CRITICAL: format + bold_red + "%(levelname)s - %(message)s" + reset
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
+
+
+def setupLogger(name):
+    # Get a logger instance
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+
+    if (logger.hasHandlers()):
+        logger.handlers.clear()
+    
+    console_handler = logging.StreamHandler()
+
+    # Apply the custom formatter
+    formatter = ColoredFormatter()
+    console_handler.setFormatter(formatter)
+
+    # Add the console handler to the logger
+    logger.addHandler(console_handler)
+
+    return logger
+
+logger = setupLogger("argParser")
+
+# Initialize default values
+use_webserver = False
+model_type = None
+model_path = None
+camera_index = 0
+webserver_port = 8001
+
+# Define a regex pattern to detect combined flags (e.g., -wtv5m)
+combined_pattern = re.compile(r'^-w?(t(v5|v8))?(m.+)?$')
+
+# Loop through the command-line arguments
+i = 1  # Start after the script name (sys.argv[0] is the script name)
+while i < len(sys.argv):
+    arg = sys.argv[i]
+    
+    match = combined_pattern.match(arg)
+    if match:
+        # Handle the combined flag
+        if 'w' in arg:
+            use_webserver = True
+        if match.group(1):  # Extract model type (e.g., tv5 or tv8)
+            model_type = 'yolov5' if match.group(2) == 'v5' else 'yolov8'
+        if match.group(3):  # Extract model path if it's combined (e.g., -mmodel.rknn)
+            model_path = match.group(3)[1:]  # Remove the 'm' prefix
+    else:
+        # Handle standalone arguments like -m, -t, -c, -wp
+        if arg == '-m':
+            # If -m is separate, get the next argument as the model path
+            i += 1
+            if i < len(sys.argv):
+                model_path = sys.argv[i]
+            else:
+                logger.critical("Error: Model path is required after -m.")
+                sys.exit(1)
+        elif arg.startswith('-m') and len(arg) > 2:
+            # If -m is combined with the model path, extract it
+            model_path = arg[2:]
+        elif arg.startswith('-t') and len(arg) > 2:
+            # If -t is combined with the model type, extract it
+            if 'v5' in arg:
+                model_type = 'yolov5'
+            elif 'v8' in arg:
+                model_type = 'yolov8'
+        elif arg == '-t':
+            # If -t is separate, get the next argument as the model type
+            i += 1
+            if i < len(sys.argv):
+                if sys.argv[i] == 'yolov5' or sys.argv[i] == 'yolov8':
+                    model_type = sys.argv[i]
+                else:
+                    logger.critical("Error: Invalid model type. Use 'yolov5' or 'yolov8'.")
+                    sys.exit(1)
+            else:
+                logger.critical("Error: Model type is required after -t.")
+                sys.exit(1)
+        elif arg.startswith('-c'):
+            try:
+                camera_index = int(arg[2:])
+            except ValueError:
+                logger.critical("Invalid camera index provided.")
+                sys.exit(1)
+        elif arg.startswith('-wp'):
+            try:
+                webserver_port = int(arg[3:])
+            except ValueError:
+                logger.critical("Invalid webserver port provided.")
+                sys.exit(1)
+
+    i += 1
+
+# Validate required arguments
+if not model_type:
+    logger.critical("Error: Model type (-t or combined flag) is required.")
+    sys.exit(1)
+
+if not model_path:
+    logger.critical("Error: Model path (-m or combined flag) is required.")
+    sys.exit(1)
+
+logger.info("Model path: " + model_path)
+
+mfs = model_path
 
 if (model_type == 'yolov5'):
     fd = ppcb.Yolov5.filter_detections
@@ -45,7 +167,7 @@ def webServer(outputs_queue, ldf):
             ws.send(ldf)
             ldf = None
     
-    server = pywsgi.WSGIServer(('0.0.0.0', 8001), app, handler_class=WebSocketHandler)
+    server = pywsgi.WSGIServer(('0.0.0.0', webserver_port), app, handler_class=WebSocketHandler)
     server.serve_forever()
 
 def signal_handler(sig, frame):
@@ -104,52 +226,7 @@ def overwriteLast(lines=1):
 npuResolverCount = 4*3
 postProcessorCount = 3
 
-class ColoredFormatter(logging.Formatter):
 
-    grey = "\x1b[38;20m"
-    yellow = "\x1b[93;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    purple = "\x1b[35;20m"
-    format = "%(asctime)s - %(name)s - "
-
-    FORMATS = {
-        logging.DEBUG: format + purple + "%(levelname)s - %(message)s" + reset,
-        logging.INFO: format + grey + "%(levelname)s - %(message)s" + reset,
-        logging.WARNING: format + yellow + "%(levelname)s - %(message)s" + reset,
-        logging.ERROR: format + red + "%(levelname)s - %(message)s" + reset,
-        logging.CRITICAL: format + bold_red + "%(levelname)s - %(message)s" + reset
-    }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
-
-
-def setupLogger(name):
-    # Get a logger instance
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False
-
-    if (logger.hasHandlers()):
-        logger.handlers.clear()
-    
-    console_handler = logging.StreamHandler()
-
-    # Apply the custom formatter
-    formatter = ColoredFormatter()
-    console_handler.setFormatter(formatter)
-
-    # Add the console handler to the logger
-    logger.addHandler(console_handler)
-
-    return logger
 
 import time
 
@@ -260,7 +337,7 @@ def postProcessor(post_processing_queue, outputs_queue, wid):
 
 def cameraStreamer(input_queue):
     logger = setupLogger("cameraStreamer")
-    camera = cv2.VideoCapture(args.camera)
+    camera = cv2.VideoCapture(camera_index)
     frame_id = 0  # Initialize the frame ID counter
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
@@ -272,6 +349,9 @@ def cameraStreamer(input_queue):
             frame_id += 1  # Increment the frame ID for each new frame
         else:
             logger.critical("Camera streamer failed to read frame")
+            time.sleep(0.5)
+            logger.critical("Unable to continue, causing stack crash...")
+            signal_handler(None, None)
 
     
 
@@ -329,9 +409,10 @@ with Manager() as manager:
     w.start()
     processes.append(w)
 
-    ws = Process(target=webServer, args=(outputs_queue,ldf))
-    ws.start()
-    processes.append(ws)
+    if use_webserver:
+        ws = Process(target=webServer, args=(outputs_queue,ldf))
+        ws.start()
+        processes.append(ws)
 
     
 
