@@ -5,12 +5,12 @@ import numpy as np
 import cv2
 import ppcb
 from multiprocessing import Process, Queue, Manager
+from threading import Thread
 from bottle import Bottle, request, run # type: ignore
 from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
 
 class ColoredFormatter(logging.Formatter):
-
     grey = "\x1b[38;20m"
     yellow = "\x1b[93;20m"
     red = "\x1b[31;20m"
@@ -18,7 +18,6 @@ class ColoredFormatter(logging.Formatter):
     reset = "\x1b[0m"
     purple = "\x1b[35;20m"
     format = "%(asctime)s - %(name)s - "
-
     FORMATS = {
         logging.DEBUG: format + purple + "%(levelname)s - %(message)s" + reset,
         logging.INFO: format + grey + "%(levelname)s - %(message)s" + reset,
@@ -35,28 +34,17 @@ class ColoredFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
-
 def setupLogger(name):
-    # Get a logger instance
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
-
     if (logger.hasHandlers()):
         logger.handlers.clear()
-
     console_handler = logging.StreamHandler()
-
-    # Apply the custom formatter
     formatter = ColoredFormatter()
     console_handler.setFormatter(formatter)
-
-    # Add the console handler to the logger
     logger.addHandler(console_handler)
-
     return logger
-
-
 
 logger = setupLogger("argParser")
 
@@ -74,7 +62,6 @@ combined_pattern = re.compile(r'^-w?(t(v5|v8))?(m.+)?$')
 i = 1  # Start after the script name (sys.argv[0] is the script name)
 while i < len(sys.argv):
     arg = sys.argv[i]
-
     match = combined_pattern.match(arg)
     if match:
         # Handle the combined flag
@@ -87,7 +74,6 @@ while i < len(sys.argv):
     else:
         # Handle standalone arguments like -m, -t, -c, -wp
         if arg == '-m':
-            # If -m is separate, get the next argument as the model path
             i += 1
             if i < len(sys.argv):
                 model_path = sys.argv[i]
@@ -95,16 +81,13 @@ while i < len(sys.argv):
                 logger.critical("Error: Model path is required after -m.")
                 sys.exit(1)
         elif arg.startswith('-m') and len(arg) > 2:
-            # If -m is combined with the model path, extract it
             model_path = arg[2:]
         elif arg.startswith('-t') and len(arg) > 2:
-            # If -t is combined with the model type, extract it
             if 'v5' in arg:
                 model_type = 'yolov5'
             elif 'v8' in arg:
                 model_type = 'yolov8'
         elif arg == '-t':
-            # If -t is separate, get the next argument as the model type
             i += 1
             if i < len(sys.argv):
                 if sys.argv[i] == 'yolov5' or sys.argv[i] == 'yolov8':
@@ -127,24 +110,15 @@ while i < len(sys.argv):
             except ValueError:
                 logger.critical("Invalid webserver port provided.")
                 sys.exit(1)
-
     i += 1
 
-# Validate required arguments
 if not model_type:
     model_type = "yolov8"
 
-    #logger.critical("Error: Model type (-t or combined flag) is required.")
-    #sys.exit(1)
-
 if not model_path:
-    model_path ="modeltest.rknn"
-
-    #logger.critical("Error: Model path (-m or combined flag) is required.")
-    #sys.exit(1)
+    model_path = "modeltest.rknn"
 
 logger.info("Model path: " + model_path)
-
 mfs = model_path
 
 if (model_type == 'yolov5'):
@@ -156,7 +130,6 @@ else:
 
 sigTerm = False
 
-
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.float32):
@@ -167,9 +140,7 @@ class NumpyEncoder(json.JSONEncoder):
 
 def webServer(outputs_queue, ldf):
     logger = setupLogger("webServer")
-
     app = Bottle()
-
     @app.route('/ws')
     def serve_ws():
         logger.debug("New connection")
@@ -183,7 +154,6 @@ def webServer(outputs_queue, ldf):
                 continue
             if lastldf == ldf['det']:
                 continue
-
             ws.send(json.dumps(ldf['det'], cls=NumpyEncoder))
             lastldf = ldf['det']
     server = pywsgi.WSGIServer(('100.64.0.7', webserver_port), app, handler_class=WebSocketHandler)
@@ -217,34 +187,13 @@ class Detection:
 
 def crop640(image):
     return cv2.resize(image, (640, 640))
-    # Get the original image size
-    # Get the dimensions of the image
-    h, w = image.shape[:2]
-
-    # Determine the center cropping size (square based on smallest dimension)
-    crop_size = min(h, w)
-
-    # Calculate the coordinates for the center cropping
-    x_center = w // 2
-    y_center = h // 2
-
-    # Calculate the top-left corner of the cropping box
-    x1 = x_center - crop_size // 2
-    y1 = y_center - crop_size // 2
-
-    # Crop the image (centered)
-    cropped_image = image[y1:y1+crop_size, x1:x1+crop_size]
-
-    # Resize the cropped image to 640x640
-    final_image = cv2.resize(cropped_image, (640, 640))
-
-    return final_image
 
 def overwriteLast(lines=1):
     print("\033[A                             \033[A"*lines)
 
-npuResolverCount = 4*3
-postProcessorCount = 3
+npuResolverCount = 4*3  # 12 NPU workers
+postProcessorCount = 3  # 3 post-processing workers
+resizeWorkerCount = 4  # 4 resizing workers
 
 def displayFrames(output_queue, ldf):
     last_displayed_id = -1  # Keep track of the last displayed frame ID
@@ -253,17 +202,20 @@ def displayFrames(output_queue, ldf):
     frame_count = 0
     start_time = time.time()
 
+    def resize_and_display_frame(drawn_frame):
+        resized_frame = cv2.resize(drawn_frame, (1280, 720))
+        cv2.imshow("out", resized_frame)
+        cv2.waitKey(1)
+
     while True:
         if not output_queue:
             continue
 
-        # Safely iterate over a copy of the output queue
         available_frame_ids = [task for task in list(output_queue) if task is not None]
 
         if not available_frame_ids:
             continue
 
-        # Check if the next frame in sequence is available
         next_expected_id = last_displayed_id + 1
 
         for i in available_frame_ids:
@@ -272,7 +224,6 @@ def displayFrames(output_queue, ldf):
                 drawn_frame = ppcb.CommonOps.draw_boxes(img, i.detections)
 
                 if drawn_frame is not None:
-                    # Calculate FPS
                     frame_count += 1
                     end_time = time.time()
                     elapsed_time = end_time - start_time
@@ -288,20 +239,17 @@ def displayFrames(output_queue, ldf):
                             "detections": i.detections
                         }
 
-                    # Calculate latency in milliseconds
                     latency_ms = round((time.time() - i.timeStamp) * 1000)
 
-                    # Display FPS and latency on the frame
                     cv2.putText(drawn_frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     cv2.putText(drawn_frame, f"Latency: {latency_ms} ms", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-                    # Show the frame
-                    cv2.imshow("out", cv2.resize(drawn_frame, (1280, 720)))
-                    cv2.waitKey(1)
+                    # Use main thread to display the frame instead of a new thread
+                    resize_and_display_frame(drawn_frame)
+
                     last_displayed_id = i.frame_id
                     output_queue[:] = []
                 break
-
 
 def npuResolver(input_queue, worker_id, post_processing_queue):
     logger = setupLogger("npuResolver " + str(worker_id))
@@ -310,22 +258,17 @@ def npuResolver(input_queue, worker_id, post_processing_queue):
     if ret != 0:
         logger.critical("Load failed")
         exit(ret)
-
     resolver.init_runtime(core_mask=[RKNNLite.NPU_CORE_0, RKNNLite.NPU_CORE_1, RKNNLite.NPU_CORE_2][worker_id % 3])
-
     logger.debug("Process " + str(worker_id) + " loaded using NPU core #" + str(worker_id % 3))
-
     while True:
         task = input_queue.get()
         if task is None or task.image is None:  # Check for the sentinel value
             break
-
         img = task.image.getNp()
         img = np.expand_dims(img, 0)
         outputs = resolver.inference(inputs=[img])
         task.detections = outputs
         post_processing_queue.put(task)  # Send raw output for post-processing
-
     resolver.release()
     logger.info("NPU resolver " + str(worker_id) + " closed")
 
@@ -336,18 +279,13 @@ def postProcessor(post_processing_queue, outputs_queue, wid):
         output = post_processing_queue.get()
         if output is None:  # Check for the sentinel value
             break
-
         processed_output = fd(output.detections, threshold=0.3)
         output.detections = processed_output
-
         if len(outputs_queue) > 10:
             dropped_frame = outputs_queue.pop(0)  # Drop the oldest frame
             logger.warning(f"Dropped the oldest output with frame ID: {dropped_frame.frame_id}")
-
         outputs_queue.append(output)
-
     logger.info("Post-processing process #" + str(wid) + " closed")
-
 
 def cameraStreamer(raw_frame_queue):
     logger = setupLogger("cameraStreamer")
@@ -355,9 +293,11 @@ def cameraStreamer(raw_frame_queue):
     frame_id = 0  # Initialize the frame ID counter
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    logger.debug("Starting camera stream")
     while(True):
         ret, frame = camera.read()
         if ret:
+            #logger.debug(f"Read frame {frame_id}")
             raw_frame_queue.put((frame, frame_id, time.time()))
             frame_id += 1  # Increment the frame ID for each new frame
         else:
@@ -366,13 +306,17 @@ def cameraStreamer(raw_frame_queue):
             logger.critical("Unable to continue, causing stack crash...")
             signal_handler(None, None)
 
-def resizeWorker(raw_frame_queue, resized_frame_queue):
+def resizeWorker(raw_frame_queue, resized_frame_queue, worker_id):
+    logger = setupLogger("resizeWorker " + str(worker_id))
+    logger.debug("Resizing worker started")
     while True:
-        raw_frame, frame_id, timestamp = raw_frame_queue.get()
-        if raw_frame is None:
+        frame_data = raw_frame_queue.get()
+        if frame_data is None:  # Check for the sentinel value
             break
+        raw_frame, frame_id, timestamp = frame_data
         resized_frame = crop640(raw_frame)
         resized_frame_queue.put(Detection(nparrayContainer(resized_frame.tobytes(), resized_frame.shape, resized_frame.dtype), frame_id, timestamp))
+        #logger.debug(f"Resized frame {frame_id} by worker {worker_id}")
 
 logger = setupLogger("main")
 
@@ -408,9 +352,11 @@ with Manager() as manager:
     c = Process(target=cameraStreamer, args=(raw_frame_queue,))
     c.start()
 
-    # Start the resize worker
-    r = Process(target=resizeWorker, args=(raw_frame_queue, input_queue))
-    r.start()
+    # Start the resize workers
+    for i in range(resizeWorkerCount):
+        r = Process(target=resizeWorker, args=(raw_frame_queue, input_queue, i))
+        r.start()
+        processes.append(r)
 
     # Start NPU resolver processes
     for i in range(npuResolverCount):
@@ -435,12 +381,13 @@ with Manager() as manager:
         processes.append(ws)
 
     c.join()
-    r.join()
+    for r in processes[:resizeWorkerCount]:
+        r.join()
 
     # Wait for all NPU resolver processes to finish
-    for p in processes[:npuResolverCount]:
+    for p in processes[resizeWorkerCount:resizeWorkerCount + npuResolverCount]:
         p.join()
 
     # Wait for the post-processing and printer processes to finish
-    for p in processes[npuResolverCount:]:
+    for p in processes[resizeWorkerCount + npuResolverCount:]:
         p.join()
