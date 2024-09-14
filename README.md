@@ -41,3 +41,5 @@ The whole RKNN toolkit is not well documented (and also not well written) which 
 Final camera stream system. Each box is a process. WIP explanation
 ![NPU pipeline(1)](https://github.com/user-attachments/assets/da31de91-0ed7-4f7e-b67f-7f0b79e849fb)
 
+
+test by rian :D
